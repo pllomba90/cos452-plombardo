@@ -53,7 +53,7 @@
       return program;
     }
 
-    // ---- Column-major mat4 helpers ----
+   
     function translation(tx, ty) { return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, tx,ty,0,1]); }
     function scaling(sx, sy) { return new Float32Array([sx,0,0,0, 0,sy,0,0, 0,0,1,0, 0,0,0,1]); }
     function orthographic(l, r, b, t) {
@@ -105,7 +105,7 @@
       if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
       gl.viewport(0, 0, canvas.width, canvas.height);
 
-      // (a) The square stays square because of these two lines.
+      // The square stays square because of these two lines.
       // aspect = width / height is recomputed on every render (including
       // every resize), and the orthographic projection uses it for the
       // left/right bounds (-aspect, aspect) while top/bottom stay at -1, 1.
