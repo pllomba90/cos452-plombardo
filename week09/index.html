@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Week 9 -- Textures</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    canvas { width: 100%; height: 100%; display: block; }
+  </style>
+</head>
+<body>
+  <canvas id="gl-canvas"></canvas>
+  <script>
+    const canvas = document.getElementById("gl-canvas");
+    const gl = canvas.getContext("webgl2");
+    if (!gl) {
+      throw new Error("WebGL2 is not available on this device/browser.");
+    }
+
+    const vertexSource = `#version 300 es
+      in vec2 a_position;
+      in vec2 a_uv;
+      out vec2 v_uv;
+      void main() {
+        gl_Position = vec4(a_position, 0.0, 1.0);
+        v_uv = a_uv;
+      }`;
+
+    const fragmentSource = `#version 300 es
+      precision mediump float;
+      in vec2 v_uv;
+      uniform sampler2D u_texture;
+      out vec4 outColor;
+      void main() { outColor = texture(u_texture, v_uv); }`;
+
+    function createShader(gl, type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        throw new Error("Shader failed to compile: " + gl.getShaderInfoLog(shader));
+      }
+      return shader;
+    }
+    function createProgram(gl, vsSource, fsSource) {
+      const program = gl.createProgram();
+      gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+      gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        throw new Error("Program failed to link: " + gl.getProgramInfoLog(program));
+      }
+      return program;
+    }
+
+    const program = createProgram(gl, vertexSource, fragmentSource);
+
+    // interleaved: x, y, u, v
+    //  I bumped every 1 in the u/v columns up to 2, so the UVs now run 0 -> 2.
+    // With the old 0 -> 1 range the sampler never reads outside the image, so
+    // REPEAT and CLAMP_TO_EDGE looked identical. Past 1.0 the wrap mode actually
+    // has to decide what to do, so now you can see the difference.
+    const data = new Float32Array([
+      -0.7,-0.7, 0,0,   0.7,-0.7, 2,0,   0.7,0.7, 2,2,
+      -0.7,-0.7, 0,0,   0.7, 0.7, 2,2,  -0.7,0.7, 0,2,
+    ]);
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+    const F = Float32Array.BYTES_PER_ELEMENT, stride = 4 * F;
+    const aPosition = gl.getAttribLocation(program, "a_position");
+    gl.enableVertexAttribArray(aPosition);
+    gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, stride, 0);
+    const aUV = gl.getAttribLocation(program, "a_uv");
+    gl.enableVertexAttribArray(aUV);
+    gl.vertexAttribPointer(aUV, 2, gl.FLOAT, false, stride, 2 * F);
+    const uTexture = gl.getUniformLocation(program, "u_texture");
+
+    const texture = gl.createTexture();
+
+    const image = new Image();
+    image.onload = () => {
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+
+      // When I commented this out, the picture came up upside down. The reason is
+      // the browser hands over image rows top row first, and texImage2D puts that
+      // first row at v = 0. But on my quad v = 0 is the BOTTOM edge. So the top of the photo ends up at the bottom.
+      // UNPACK_FLIP_Y_WEBGL flips the rows on upload so the top row lands at v = 1.
+      // The other way to fix it is to leave this off and flip V in the UV data
+      // instead: v becomes 1 - v (swap which corners get the high and low v).
+      // I turned it back on since it's the one-line fix.
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+
+      //   REPEAT: the image tiles, 2 x 2 copies across the quad. Anything past 1.0
+      //     just wraps back around to the start of the image.
+      //   CLAMP_TO_EDGE: the image only shows once in the bottom-left quarter, and
+      //     the rest of the quad is the last row/column of edge pixels smeared out
+      //     into long streaks (top-right corner is one solid corner-pixel color).
+      // Leaving it on REPEAT so the effect of the 0 -> 2 UVs is obvious.
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+
+      //   NEAREST: grabs the single closest texel, so it looks blocky / pixelated,
+      //     like an old video game. Hard edges between pixels.
+      //   LINEAR: blends the 4 nearest texels, so it looks smooth but a little
+      //     blurry/soft when it's magnified a lot.
+      // Keeping LINEAR since it looks better for a photo.
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      render();
+    };
+    image.onerror = () => {
+      console.error("Couldn't load " + image.src + " -- check the file name and case.");
+    };
+
+    // My own image, sitting in the same folder as index.html.
+    image.src = "texture.png"; // must be served over http (Live Server)
+
+    function render() {
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.round(canvas.clientWidth * dpr);
+      const h = Math.round(canvas.clientHeight * dpr);
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      gl.viewport(0, 0, canvas.width, canvas.height);
+
+      gl.useProgram(program);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.uniform1i(uTexture, 0);
+
+      gl.clearColor(0.10, 0.12, 0.16, 1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    render(); 
+    window.addEventListener("resize", render);
+
+    // Committed texture.png right next to index.html, pushed, opened the Pages
+    // URL, and checked F12: image shows on the quad and the console is clean.
+  </script>
+</body>
+</html>
